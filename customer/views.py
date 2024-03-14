@@ -1,8 +1,8 @@
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.views import View
 from .models import MenuItem, Order
 from django.core.mail import send_mail
-
+from yenepay import Client, Item, Cart
 
 class Index(View):
     def get(self, request, *args, **kwargs):
@@ -81,4 +81,44 @@ class OrderView(View):
             'price': price
         }
 
+        return redirect('order-conf', pk=order.pk)
+
+
+class OrderConfirmation(View):
+    def get(self, request, pk, *args, **kwargs):
+        order = Order.objects.get(pk=pk)
+        context = {
+            'pk': order.pk,
+            'items': order.items,
+            'price': order.price
+        }
         return render(request, 'customer/order_confirmation.html', context)
+
+
+class OrderPayConfirmation(View):
+    def get(self, request, pk, *args, **kwargs):
+        order = Order.objects.get(pk=pk)
+        MERCHANT_ID = "38017"
+        client = Client(merchant_id=MERCHANT_ID)
+
+        items = [Item(item.name, float(item.price), 1) for item in order.items.all()]
+        cart = Cart(*items)
+
+        cart_checkout = client.get_cart_checkout(items=cart)
+        checkout_url = cart_checkout.get_url()
+        return redirect(checkout_url)
+
+    # need correction, it doesn't take the response and redirect
+    def post(self, request, pk, *args, **kwargs):
+        order = Order.objects.get(pk=pk)
+        client = Client(merchant_id="38017", token="abcd")
+        merchant_order_id = "0000"
+        transaction_id = "abcd"
+
+        response = client.check_pdt_status(merchant_order_id, transaction_id)
+
+        if response.result == "SUCCESS" and response.status == "Paid":
+            order.is_paid = True
+            return render(request, 'customer/order_pay_confirmation.html')
+        else:
+            return render(request, 'customer/payment_failure.html')
